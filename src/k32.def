@@ -1,0 +1,13 @@
+LIBRARY KERNEL32.dll
+EXPORTS
+GetModuleHandleA
+GetModuleFileNameA
+CreateFileA
+WriteFile
+CloseHandle
+VirtualProtect
+GetPrivateProfileStringA
+QueryPerformanceCounter
+QueryPerformanceFrequency
+GetCurrentProcessId
+IsBadReadPtr
