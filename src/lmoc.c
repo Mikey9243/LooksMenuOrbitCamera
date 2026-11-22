@@ -49,8 +49,8 @@ int _fltused = 0;
 void* memset(void* d, int c, u64 n) { u8* p = d; while (n--) *p++ = (u8)c; return d; }
 void* memcpy(void* d, const void* s, u64 n) { u8* p = d; const u8* q = s; while (n--) *p++ = *q++; return d; }
 
-#define LMOC_VERSION_STR "1.4.1"
-#define LMOC_VERSION_NUM 0x01040100
+#define LMOC_VERSION_STR "1.4.2"
+#define LMOC_VERSION_NUM 0x01040200
 /* 1.1.0: every Fallout 4 version F4SE exists for. Addresses (offsets from the exe base) of the three game singletons
    used, taken from the F4SE source at each release tag: GameCamera.cpp g_playerCamera, GameMenus.cpp g_ui,
    GameReferences.cpp g_player. The structure offsets used are the same in all of them (F4SE headers 0.6.23 - 0.7.9;
@@ -501,8 +501,17 @@ static V3 orbit_cam_pos(const Orbit* o, V3 base) {
 }
 static void reset_orbit(Orbit* o);
 static void reset_orbit_fwd(void) { reset_orbit(&g_tgt); }
+static void* nearby_other(float* outDist);
 static void reset_orbit(Orbit* o) {
+    void* other; float od = 0;
     o->yaw = wrap_pi(player_heading());   /* camera in front of the character, looking at its face side */
+    /* 1.4.2: if another character stands close by (the spouse at the mirror in a new game), put the camera on the far
+       side from it, so it can never stand between the camera and the edited character. */
+    other = nearby_other(&od);
+    if (other) {
+        V3 me = player_pos(), ot = PTR(other, 0xD0, V3); V3 d = vsub(me, ot);
+        if (d.x * d.x + d.y * d.y > 1) { o->yaw = fatan2(d.x, d.y); logf("  another character %f units away - camera placed on the far side from it", od); }
+    }
     /* 1.2.0: distance and focus height follow the character's size (a scaled NPC gets a scaled view) */
     o->pitch = 0.087f; o->dist = clampf(C.distance * g_targetScale, C.minZoom, C.maxZoom); o->focus = clampf(C.focusHeight * g_targetScale, C.minFocus, C.maxFocus);
 }
@@ -688,6 +697,26 @@ static void choose_target(V3 cam, V3 cols[3], int stateId) {
    and switch to a new character the moment one appears. */
 static int g_fpN; static void fp_hide(void);
 static void* g_lastSlotActor[4]; static u32 g_lastSlotIdx = 99, g_watchFrames;
+
+/* 1.4.2: the closest other character (player or a character-creation slot actor) within 250 units of the target */
+static void* nearby_other(float* outDist) {
+    void* cands[5]; int n = 0, i; void* best = 0; float bestD = 250; V3 me; void* pl = player_ref();
+    if (!g_target) return 0;
+    me = player_pos();
+    if (pl && pl != g_target) cands[n++] = pl;
+    if (RVA_CC && !IsBadReadPtr((void*)(g_base + RVA_CC), 32)) for (i = 0; i < 4; i++) {
+        void* c = ((void**)(g_base + RVA_CC))[i]; void* a = (c && !((u64)c & 7) && !IsBadReadPtr(c, 0x70)) ? PTR(c, 0x58, void*) : 0;
+        if (a && a != g_target && a != pl && ref_ok(a)) cands[n++] = a;
+    }
+    for (i = 0; i < n; i++) {
+        V3 p; float d;
+        if (!ref_ok(cands[i])) continue;
+        p = PTR(cands[i], 0xD0, V3); d = vlen(v3(p.x - me.x, p.y - me.y, 0));
+        if (d < bestD) { bestD = d; best = cands[i]; }
+    }
+    if (outDist) *outDist = bestD;
+    return best;
+}
 static void target_watch(void) {
     u32 idx = 99; void* a = chargen_actor(&idx); int i; void* pl = player_ref();
     g_watchFrames++;
@@ -695,7 +724,19 @@ static void target_watch(void) {
         void* c = ((void**)(g_base + RVA_CC))[i]; void* ca = (c && !((u64)c & 7) && !IsBadReadPtr(c, 0x70)) ? PTR(c, 0x58, void*) : 0;
         if (ca != g_lastSlotActor[i]) { logf("  frame %u: character-creation slot %d now holds actor %p", g_watchFrames, i, ca); g_lastSlotActor[i] = ca; }
     }
-    if (idx != g_lastSlotIdx) { logf("  frame %u: character-creation slot in use is now %u", g_watchFrames, idx); g_lastSlotIdx = idx; }
+    if (idx != g_lastSlotIdx) {
+        int first = g_lastSlotIdx == 99;
+        logf("  frame %u: character-creation slot in use is now %u", g_watchFrames, idx); g_lastSlotIdx = idx;
+        /* 1.4.2: back to the player (new game: switching from Nora back to Nate, or the other way round) */
+        if (!first && a == pl && pl && g_target && g_target != pl && g_active) {
+            u8* pc = (u8*)player_camera(); void* st = pc ? PTR(pc, 0x28, void*) : 0;
+            if (st && PTR(st, 0x20, int) != 0) {
+                g_target = pl; g_targetScale = ref_scale(pl);
+                logf("  frame %u: LooksMenu is editing the player again - the camera and the freeze switch back", g_watchFrames);
+                freeze_end(); freeze_request(pl, 1); reset_orbit(&g_tgt);
+            }
+        }
+    }
     if (!g_target && g_watchFrames % 15 == 0) {   /* nothing found at the opening: the console selection may load late too */
         u32 ch = 0; void* con = console_ref(&ch);
         if (con && con != pl && body_nodes(con, 60) >= 30 && (!a || a == pl)) a = con;
@@ -704,6 +745,7 @@ static void target_watch(void) {
         u32 refId = PTR(a, 0x14, u32);
         g_target = a; g_targetScale = ref_scale(a);
         logf("  frame %u: LooksMenu is editing NPC %x - the camera and the freeze switch to it", g_watchFrames, refId);
+        { V3 p = PTR(a, 0xD0, V3), q = pl ? PTR(pl, 0xD0, V3) : v3(0, 0, 0); logf("    NPC at %f %f %f heading %f, player at %f %f %f heading %f", p.x, p.y, p.z, PTR(a, 0xC8, float), q.x, q.y, q.z, pl ? PTR(pl, 0xC8, float) : 0.0f); }
         freeze_end(); freeze_request(a, 1);
         reset_orbit(&g_tgt);
         if (!g_active) {   /* the orbit had not started (no target at the opening): start it now with the standard axes */

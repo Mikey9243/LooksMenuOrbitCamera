@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.2
+- Fixed (new game, at the mirror): after switching to the other character, the other one could still stand between the camera and the character being edited. When another character stands close by, the camera now starts on the far side from it, so it can never block the view.
+- Switching back to the player at the mirror now moves the camera and the freeze back to the player as well.
+
 ## 1.4.1
 - Fixed: at the start of a new game, after switching to the other character at the mirror (for example from Nate to Nora), the other character stood in the way of the camera. The newly chosen character was frozen at the moment of the switch, before the game had walked it to the mirror. The freeze now waits until the character has stopped moving, the camera follows it while it walks, and then puts itself in front of it.
 
