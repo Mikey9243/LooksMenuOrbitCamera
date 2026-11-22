@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.1
+- Fixed: at the start of a new game, after switching to the other character at the mirror (for example from Nate to Nora), the other character stood in the way of the camera. The newly chosen character was frozen at the moment of the switch, before the game had walked it to the mirror. The freeze now waits until the character has stopped moving, the camera follows it while it walks, and then puts itself in front of it.
+
 ## 1.4.0
 - Release of the NPC support built in 1.2.0 - 1.3.6:
   - The camera circles whoever LooksMenu is editing: your own character, or an NPC opened with `slm` (companions, settlers, named and generic NPCs). Same controls, settings and smoothing as for the player.

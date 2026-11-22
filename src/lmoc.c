@@ -49,8 +49,8 @@ int _fltused = 0;
 void* memset(void* d, int c, u64 n) { u8* p = d; while (n--) *p++ = (u8)c; return d; }
 void* memcpy(void* d, const void* s, u64 n) { u8* p = d; const u8* q = s; while (n--) *p++ = *q++; return d; }
 
-#define LMOC_VERSION_STR "1.4.0"
-#define LMOC_VERSION_NUM 0x01040000
+#define LMOC_VERSION_STR "1.4.1"
+#define LMOC_VERSION_NUM 0x01040100
 /* 1.1.0: every Fallout 4 version F4SE exists for. Addresses (offsets from the exe base) of the three game singletons
    used, taken from the F4SE source at each release tag: GameCamera.cpp g_playerCamera, GameMenus.cpp g_ui,
    GameReferences.cpp g_player. The structure offsets used are the same in all of them (F4SE headers 0.6.23 - 0.7.9;
@@ -499,6 +499,8 @@ static V3 orbit_cam_pos(const Orbit* o, V3 base) {
     V3 f = vadd(base, v3(0, 0, o->focus)); float cp = fcos(o->pitch);
     return vadd(f, v3(o->dist * cp * fsin(o->yaw), o->dist * cp * fcos(o->yaw), o->dist * fsin(o->pitch)));
 }
+static void reset_orbit(Orbit* o);
+static void reset_orbit_fwd(void) { reset_orbit(&g_tgt); }
 static void reset_orbit(Orbit* o) {
     o->yaw = wrap_pi(player_heading());   /* camera in front of the character, looking at its face side */
     /* 1.2.0: distance and focus height follow the character's size (a scaled NPC gets a scaled view) */
@@ -583,6 +585,31 @@ static void freeze_begin(void* ref) {
     if (g_fzCount < 30) fz_dump(root, 0);
     g_fzOn = 1; g_fzOnFwd = 1; g_fzPosFwd = g_fzPos; g_fzHeadingFwd = g_fzHeading;
     logf("  character frozen: %d nodes held in their pose", g_fzCount);
+}
+
+/* 1.4.1: the freeze waits until the character has stopped moving. At the start of a new game the game walks the two
+   characters into place when you switch between them at the mirror; 1.4.0 froze the newly chosen one at the moment of
+   the switch, before it had walked to the mirror, so it stayed behind (invisible spot) while the other character stood
+   in the camera's way. The orbit follows the character's live position until the freeze starts. */
+static void* g_fzPending; static V3 g_fzLastPos; static int g_fzStill, g_fzWaited, g_fzResetOrbit;
+static void freeze_request(void* ref, int resetOrbit) {
+    g_fzPending = ref; g_fzStill = 0; g_fzWaited = 0; g_fzResetOrbit = resetOrbit;
+    if (ref_ok(ref)) g_fzLastPos = PTR(ref, 0xD0, V3);
+}
+static void reset_orbit_fwd(void);
+static void freeze_pending_frame(void) {
+    V3 p; float d;
+    if (!g_fzPending) return;
+    if (!ref_ok(g_fzPending)) { g_fzPending = 0; return; }
+    p = PTR(g_fzPending, 0xD0, V3); d = vlen(vsub(p, g_fzLastPos)); g_fzLastPos = p;
+    g_fzWaited++;
+    if (d > 0.05f) g_fzStill = 0; else g_fzStill++;
+    if (g_fzStill >= 20 || g_fzWaited >= 600) {   /* 20 frames without moving (or 10 seconds at most) */
+        void* r = g_fzPending; g_fzPending = 0;
+        logf("  character stood still after %d frames - freezing it now", g_fzWaited);
+        freeze_begin(r);
+        if (g_fzResetOrbit) reset_orbit_fwd();
+    }
 }
 static void freeze_frame(void) {
     void* root; int changed; typedef void (*U)(void*, void*, u32); u8 ud[0x40];
@@ -677,7 +704,7 @@ static void target_watch(void) {
         u32 refId = PTR(a, 0x14, u32);
         g_target = a; g_targetScale = ref_scale(a);
         logf("  frame %u: LooksMenu is editing NPC %x - the camera and the freeze switch to it", g_watchFrames, refId);
-        freeze_end(); freeze_begin(a);
+        freeze_end(); freeze_request(a, 1);
         reset_orbit(&g_tgt);
         if (!g_active) {   /* the orbit had not started (no target at the opening): start it now with the standard axes */
             g_axisF = 1; g_sF = 1; g_axisU = 2; g_sU = 1; g_axisT = 0; g_sT = 1;
@@ -936,14 +963,14 @@ static void hk_StateUpdate(void* state, void* next) {
         g_mouseDX = g_mouseDY = g_wheel = 0; g_resetRequest = 0; g_rotateHeld = 0; g_skipLogged = 0; g_padValid = 0; g_keyUpHeld = g_keyDownHeld = 0;
         g_fzOnFwd = 0; g_watchFrames = 0; g_lastSlotIdx = 99; memset(g_lastSlotActor, 0, sizeof(g_lastSlotActor));
         g_active = root ? begin_orbit(root, id) : 0;
-        if (g_target) freeze_begin(g_target);
+        g_fzPending = 0; if (g_target) freeze_request(g_target, 0);
         g_fpN = 0; g_fpScaled = 0; if (g_active && id == 0 && g_target && g_target != player_ref()) fp_hide();
         g_frames = 0; g_haveLast = 0; g_driftLogs = 0;
         if (root && C.debugLog) { logf("  camera node tree (before the orbit camera):"); dump_tree(root, 0); if (PTR(root, 0x28, void*)) logf("  root parent: %s", node_name(PTR(root, 0x28, void*))); }
     }
-    if (!open && g_wasOpen) { fp_restore(); freeze_end(); logf("LooksMenu closed - game camera restored (%u orbit frames)", g_frames); g_active = 0; g_target = 0; g_targetScale = 1; }
+    if (!open && g_wasOpen) { fp_restore(); freeze_end(); g_fzPending = 0; logf("LooksMenu closed - game camera restored (%u orbit frames)", g_frames); g_active = 0; g_target = 0; g_targetScale = 1; }
     g_wasOpen = open;
-    if (open) { target_watch(); freeze_frame(); fp_frame(); }
+    if (open) { target_watch(); freeze_pending_frame(); freeze_frame(); fp_frame(); }
     g_orbitActive = open && g_active;
     if (!g_orbitActive || !root) return;
     if (C.rotateButton != 0 && C.enableMouseKeyboard) {   /* button released while another window had focus etc. */
