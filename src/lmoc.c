@@ -49,8 +49,8 @@ int _fltused = 0;
 void* memset(void* d, int c, u64 n) { u8* p = d; while (n--) *p++ = (u8)c; return d; }
 void* memcpy(void* d, const void* s, u64 n) { u8* p = d; const u8* q = s; while (n--) *p++ = *q++; return d; }
 
-#define LMOC_VERSION_STR "1.4.3"
-#define LMOC_VERSION_NUM 0x01040300
+#define LMOC_VERSION_STR "1.4.4"
+#define LMOC_VERSION_NUM 0x01040400
 /* 1.1.0: every Fallout 4 version F4SE exists for. Addresses (offsets from the exe base) of the three game singletons
    used, taken from the F4SE source at each release tag: GameCamera.cpp g_playerCamera, GameMenus.cpp g_ui,
    GameReferences.cpp g_player. The structure offsets used are the same in all of them (F4SE headers 0.6.23 - 0.7.9;
@@ -804,25 +804,42 @@ static void fp_restore(void) {
    camera moves away from her face. While LooksMenu edits another character that stands within 60 units of the
    player, the player's third-person body is shrunk to nothing (local scale of its 3D root) and put back as soon as
    that is no longer the case or the menu closes. */
-static void* g_tpNode; static float g_tpScale; static int g_tpOn;
+static void* g_tpNode; static void* g_tpRef; static float g_tpScale; static int g_tpOn;
 static void tp_restore(const char* why) {
     if (g_tpOn && g_tpNode && !IsBadReadPtr(g_tpNode, 0x110)) {
         PTR(g_tpNode, 0x6C, float) = (g_tpScale > 0.01f && g_tpScale < 100) ? g_tpScale : 1.0f; fp_update(g_tpNode);
-        logf("  player's body shown again (%s)", why);
+        logf("  hidden character's body shown again (%s)", why);
     }
-    g_tpOn = 0; g_tpNode = 0;
+    g_tpOn = 0; g_tpNode = 0; g_tpRef = 0;
+}
+/* 1.4.4: the other way round too - when the player is edited again at the mirror, the spouse stands in the player's
+   spot. Whoever overlaps the edited character (the player, or a character in another character-creation slot) is
+   hidden. */
+static void* overlapping_other(void) {
+    void* cands[5]; int n = 0, i; void* pl = player_ref(); V3 b;
+    if (!g_target || !ref_ok(g_target)) return 0;
+    b = PTR(g_target, 0xD0, V3);
+    if (pl && pl != g_target) cands[n++] = pl;
+    if (RVA_CC && !IsBadReadPtr((void*)(g_base + RVA_CC), 32)) for (i = 0; i < 4; i++) {
+        void* c = ((void**)(g_base + RVA_CC))[i]; void* a = (c && !((u64)c & 7) && !IsBadReadPtr(c, 0x70)) ? PTR(c, 0x58, void*) : 0;
+        if (a && a != g_target && a != pl) cands[n++] = a;
+    }
+    for (i = 0; i < n; i++) {
+        V3 a;
+        if (!ref_ok(cands[i])) continue;
+        a = PTR(cands[i], 0xD0, V3);
+        if (vlen(v3(a.x - b.x, a.y - b.y, a.z - b.z)) < 60) return cands[i];
+    }
+    return 0;
 }
 static void tp_frame(void) {
-    void* pl = player_ref(); void* root; int want = 0;
-    if (pl && g_target && g_target != pl && ref_ok(g_target) && ref_ok(pl)) {
-        V3 a = PTR(pl, 0xD0, V3), b = PTR(g_target, 0xD0, V3);
-        float d = vlen(v3(a.x - b.x, a.y - b.y, a.z - b.z));
-        want = d < 60;
+    void* other = overlapping_other(); void* root = other ? ref_root3d(other) : 0;
+    if (!root) { if (g_tpOn) tp_restore("it no longer overlaps the edited character"); return; }
+    if (g_tpOn && (root != g_tpNode || other != g_tpRef)) tp_restore("another character overlaps now");
+    if (!g_tpOn) {
+        g_tpNode = root; g_tpRef = other; g_tpScale = PTR(root, 0x6C, float); g_tpOn = 1;
+        logf("  %s stands where the edited character stands - its body is hidden while LooksMenu edits the other one", other == player_ref() ? "the player" : "another character");
     }
-    root = want ? ref_root3d(pl) : 0;
-    if (!want || !root) { if (g_tpOn) tp_restore("the player no longer overlaps the edited character"); return; }
-    if (g_tpOn && root != g_tpNode) tp_restore("the player's 3D was rebuilt");
-    if (!g_tpOn) { g_tpNode = root; g_tpScale = PTR(root, 0x6C, float); g_tpOn = 1; logf("  the player stands where the edited character stands - the player's body is hidden while LooksMenu edits it"); }
     if (PTR(root, 0x6C, float) != 0.0001f) { PTR(root, 0x6C, float) = 0.0001f; fp_update(root); }
 }
 static int begin_orbit(void* root, int stateId) {

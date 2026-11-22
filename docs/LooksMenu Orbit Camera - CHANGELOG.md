@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.4
+- Fixed (new game, at the mirror): switching back from the spouse to the player showed the same overlap the other way round. Whichever character stands in the edited character's spot is now hidden - the player while the spouse is edited, the spouse while the player is edited - and shown again when that changes or LooksMenu closes.
+
 ## 1.4.3
 - Fixed (new game, at the mirror): when you switch to the spouse, the game puts the spouse exactly where the player stands, so the player's body overlapped her and showed around her as soon as the camera moved. While LooksMenu edits a character standing in the player's spot, the player's body is now hidden, and it comes back when you switch back or close LooksMenu.
 

@@ -16,8 +16,8 @@ Install LLVM 18.1.x from https://github.com/llvm/llvm-project/releases and make 
 `src/LooksMenuOrbitCamera.dll`. Install it as `Data\F4SE\Plugins\LooksMenuOrbitCamera.dll` together with `src/LooksMenuOrbitCamera.ini`.
 
 ## Reproducible build
-The link uses `/Brepro`, so the same compiler version produces a byte-identical DLL. Built with Ubuntu clang 18.1.3 / LLD 18.1.3, the 1.4.3 release DLL has
+The link uses `/Brepro`, so the same compiler version produces a byte-identical DLL. Built with Ubuntu clang 18.1.3 / LLD 18.1.3, the 1.4.4 release DLL has
 
-    SHA-256 9137a93a00d016012e4f44c88ae4685cba880df45b10733b3f5df14c7e6bfde6
+    SHA-256 ee84c22b1d814d580ccbab6a8d392760fab5adc46f34f9d78b41d0464d15c048
 
 (Other LLVM builds may produce a different but equivalent binary.)
