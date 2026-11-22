@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.4.3
+- Fixed (new game, at the mirror): when you switch to the spouse, the game puts the spouse exactly where the player stands, so the player's body overlapped her and showed around her as soon as the camera moved. While LooksMenu edits a character standing in the player's spot, the player's body is now hidden, and it comes back when you switch back or close LooksMenu.
+
 ## 1.4.2
 - Fixed (new game, at the mirror): after switching to the other character, the other one could still stand between the camera and the character being edited. When another character stands close by, the camera now starts on the far side from it, so it can never block the view.
 - Switching back to the player at the mirror now moves the camera and the freeze back to the player as well.

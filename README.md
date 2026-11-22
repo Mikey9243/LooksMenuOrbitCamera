@@ -2,7 +2,7 @@
 
 F4SE plugin for Fallout 4. While LooksMenu is open, the camera orbits the character being edited (the player, or an NPC opened with `slm`); the character is held still while the menu is open.
 
-Release: LooksMenu Orbit Camera 1.4.2 on Nexus Mods.
+Release: LooksMenu Orbit Camera 1.4.3 on Nexus Mods.
 
 ## What the DLL does
 - Runs only inside the Fallout 4 process, loaded by F4SE.
