@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.5
+- Some antivirus programs flagged the plugin as a "trojan" (false positive). The plugin read keys with the Windows key-polling function and checked which window is in front - the same pattern keyloggers use - which trips the heuristics. It now reads keys only from the game's own input that it already receives, and no longer uses those functions at all. It also carries a proper version description (name, version, source link) like normal DLLs.
+- Nothing else changes; controls and settings are the same.
+
 ## 1.4.4
 - Fixed (new game, at the mirror): switching back from the spouse to the player showed the same overlap the other way round. Whichever character stands in the edited character's spot is now hidden - the player while the spouse is edited, the spouse while the player is edited - and shown again when that changes or LooksMenu closes.
 

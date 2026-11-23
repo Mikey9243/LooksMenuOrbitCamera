@@ -14,7 +14,8 @@
  *  - Input: the game's import-table entries for USER32 GetRawInputData (mouse) and XINPUT1_3 XInputGetState
  *    (ordinal 2, controller) are redirected. While the orbit camera uses an input (right-mouse drag, wheel while
  *    dragging, right stick, triggers, R3, ...) that input is removed before the game sees it, so LooksMenu's
- *    sliders and lists do not react to it. Keys (Q/E etc.) are read with GetAsyncKeyState.
+ *    sliders and lists do not react to it. Keys (Q/E etc.) are read from that same raw input (1.4.5: no
+ *    GetAsyncKeyState / foreground-window polling any more - antivirus heuristics took that for a keylogger).
  *  - Edited character: the game's character-creation slots and the console's selected reference (F4SE
  *    g_characterCreation / g_characterIndex, g_consoleHandle + LookupREFRByHandle).
  *  - Freeze: the position/rotation of each node of the character's 3D is put back every frame while the menu is open.
@@ -39,18 +40,14 @@ __declspec(dllimport) BOOL WINAPI VirtualProtect(void*, u64, u32, u32*);
 __declspec(dllimport) u32 WINAPI GetPrivateProfileStringA(const char*, const char*, const char*, char*, u32, const char*);
 __declspec(dllimport) BOOL WINAPI QueryPerformanceCounter(s64*);
 __declspec(dllimport) BOOL WINAPI QueryPerformanceFrequency(s64*);
-__declspec(dllimport) u32 WINAPI GetCurrentProcessId(void);
 __declspec(dllimport) BOOL WINAPI IsBadReadPtr(const void*, u64);
-__declspec(dllimport) s16 WINAPI GetAsyncKeyState(int);
-__declspec(dllimport) HANDLE WINAPI GetForegroundWindow(void);
-__declspec(dllimport) u32 WINAPI GetWindowThreadProcessId(HANDLE, u32*);
 __declspec(dllimport) long WINAPI SHGetFolderPathA(void*, int, HANDLE, u32, char*);
 int _fltused = 0;
 void* memset(void* d, int c, u64 n) { u8* p = d; while (n--) *p++ = (u8)c; return d; }
 void* memcpy(void* d, const void* s, u64 n) { u8* p = d; const u8* q = s; while (n--) *p++ = *q++; return d; }
 
-#define LMOC_VERSION_STR "1.4.4"
-#define LMOC_VERSION_NUM 0x01040400
+#define LMOC_VERSION_STR "1.4.5"
+#define LMOC_VERSION_NUM 0x01040500
 /* 1.1.0: every Fallout 4 version F4SE exists for. Addresses (offsets from the exe base) of the three game singletons
    used, taken from the F4SE source at each release tag: GameCamera.cpp g_playerCamera, GameMenus.cpp g_ui,
    GameReferences.cpp g_player. The structure offsets used are the same in all of them (F4SE headers 0.6.23 - 0.7.9;
@@ -299,12 +296,7 @@ typedef struct { u16 buttons; u8 lt, rt; s16 lx, ly, rx, ry; } Pad;
 static volatile int g_padValid; static Pad g_pad;
 static s64 g_lastPadTime;
 
-static int game_has_focus(void) {
-    u32 pid = 0; HANDLE w = GetForegroundWindow();
-    if (!w) return 0;
-    GetWindowThreadProcessId(w, &pid);
-    return pid == GetCurrentProcessId();
-}
+static volatile u8 g_vkDown[256];   /* 1.4.5: key state from the game's own raw keyboard input (only while orbiting) */
 
 /* GetRawInputData hook (USER32 import of Fallout4.exe) */
 typedef u32 (WINAPI *GetRawInputData_t)(HANDLE, u32, void*, u32*, u32);
@@ -317,6 +309,7 @@ static u32 WINAPI hk_GetRawInputData(HANDLE h, u32 cmd, void* data, u32* size, u
         if (*(u32*)raw == 1) {   /* RIM_TYPEKEYBOARD: Q/E (configurable) move the camera up/down while the rotate button is held */
             u8* k = raw + 24; u16 kflags = *(u16*)(k + 2), vk = *(u16*)(k + 6); int up = kflags & 1;
             if (!g_sawKeyboard) { g_sawKeyboard = 1; logf("keyboard raw input seen (Q/E while rotating can be kept away from LooksMenu)"); }
+            if (vk < 256) { if (!up && C.keyReset && vk == C.keyReset && !g_vkDown[vk]) g_resetRequest = 1; g_vkDown[vk] = up ? 0 : 1; }
             if ((vk == C.keyUp || vk == C.keyDown) && vk) {
                 volatile int* st = (vk == C.keyUp) ? &g_keyUpHeld : &g_keyDownHeld;
                 if (!up && (g_rotateHeld || C.rotateButton == 0)) { *st = 1; if (C.blockGameInput) { *(u16*)(k + 6) = 0xFF; *(u16*)k = 0; } }
@@ -923,18 +916,12 @@ static void read_inputs(float dt) {
             g_tgt.dist = clampf(g_tgt.dist * k, C.minZoom, C.maxZoom);
         }
         if (C.enableVertical) {
-            int focus = game_has_focus(), upk = g_keyUpHeld, dnk = g_keyDownHeld;
-            if (upk && !(GetAsyncKeyState(C.keyUp) & 0x8000)) g_keyUpHeld = upk = 0;       /* released while not seen */
-            if (dnk && !(GetAsyncKeyState(C.keyDown) & 0x8000)) g_keyDownHeld = dnk = 0;
-            if (!g_sawKeyboard && (g_rotateHeld || C.rotateButton == 0) && focus) {   /* no raw keyboard: read the keys directly */
-                upk = C.keyUp && (GetAsyncKeyState(C.keyUp) & 0x8000); dnk = C.keyDown && (GetAsyncKeyState(C.keyDown) & 0x8000);
-            }
-            if (focus && C.keyUpAlways && (GetAsyncKeyState(C.keyUpAlways) & 0x8000)) upk = 1;
-            if (focus && C.keyDownAlways && (GetAsyncKeyState(C.keyDownAlways) & 0x8000)) dnk = 1;
+            int upk = g_keyUpHeld, dnk = g_keyDownHeld;
+            if (C.keyUpAlways && C.keyUpAlways < 256 && g_vkDown[C.keyUpAlways]) upk = 1;
+            if (C.keyDownAlways && C.keyDownAlways < 256 && g_vkDown[C.keyDownAlways]) dnk = 1;
             if (upk) g_tgt.focus = clampf(g_tgt.focus + C.heightSpeed * dt, C.minFocus, C.maxFocus);
             if (dnk) g_tgt.focus = clampf(g_tgt.focus - C.heightSpeed * dt, C.minFocus, C.maxFocus);
         }
-        if (C.enableReset && C.keyReset && game_has_focus() && (GetAsyncKeyState(C.keyReset) & 1)) g_resetRequest = 1;
     }
     if (C.enableController && g_padValid) {
         Pad p = g_pad; float rx = stick(p.rx, C.deadZone), ry = stick(p.ry, C.deadZone), lt = p.lt / 255.f, rt = p.rt / 255.f;
@@ -1046,7 +1033,7 @@ static void hk_StateUpdate(void* state, void* next) {
     if (dt <= 0 || dt > 0.25f) dt = 0.016f;
     if (open && !g_wasOpen) {
         int id = PTR(state, 0x20, int);
-        g_mouseDX = g_mouseDY = g_wheel = 0; g_resetRequest = 0; g_rotateHeld = 0; g_skipLogged = 0; g_padValid = 0; g_keyUpHeld = g_keyDownHeld = 0;
+        g_mouseDX = g_mouseDY = g_wheel = 0; g_resetRequest = 0; g_rotateHeld = 0; memset((void*)g_vkDown, 0, sizeof(g_vkDown)); g_skipLogged = 0; g_padValid = 0; g_keyUpHeld = g_keyDownHeld = 0;
         g_fzOnFwd = 0; g_watchFrames = 0; g_lastSlotIdx = 99; memset(g_lastSlotActor, 0, sizeof(g_lastSlotActor));
         g_active = root ? begin_orbit(root, id) : 0;
         g_fzPending = 0; if (g_target) freeze_request(g_target, 0);
@@ -1059,10 +1046,6 @@ static void hk_StateUpdate(void* state, void* next) {
     if (open) { target_watch(); freeze_pending_frame(); freeze_frame(); fp_frame(); tp_frame(); }
     g_orbitActive = open && g_active;
     if (!g_orbitActive || !root) return;
-    if (C.rotateButton != 0 && C.enableMouseKeyboard) {   /* button released while another window had focus etc. */
-        int vk = C.rotateButton == 1 ? 0x01 : C.rotateButton == 2 ? 0x02 : 0x04;
-        if (!(GetAsyncKeyState(vk) & 0x8000)) g_rotateHeld = 0;
-    }
     g_frames++;
     read_inputs(dt);
     apply_orbit(root, dt);

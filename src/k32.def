@@ -9,5 +9,4 @@ VirtualProtect
 GetPrivateProfileStringA
 QueryPerformanceCounter
 QueryPerformanceFrequency
-GetCurrentProcessId
 IsBadReadPtr

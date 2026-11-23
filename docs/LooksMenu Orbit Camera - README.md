@@ -1,4 +1,4 @@
-# LooksMenu Orbit Camera 1.4.4
+# LooksMenu Orbit Camera 1.4.5
 
 Lets you walk the camera all the way around the character you are editing in LooksMenu - your own character or any NPC: front, sides, back, from above and from below, zoomed in or out. The camera moves; your character, her pose and where she stands stay exactly as they are.
 
